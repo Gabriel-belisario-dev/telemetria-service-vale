@@ -3,3 +3,9 @@ uvicorn==0.28.0
 pydantic==2.6.4
 pandas==2.2.1
 numpy==1.26.4
+#/Precisei instalar este motor de leituras de parquet para ler os arquivos parquet pois
+#/ os arquivos ultra comprimidos e o pandas não consegue ler diretamente, então usei o pyarrow para ler os arquivos parquet
+#/ em seguida converti para dataframe do pandas.
+pyarrow==15.0.2
+#/openpyxl e uma ferramenta para o padas que possibilita ler e escrever arquivos do Excel.
+openpyxl==3.1.2
