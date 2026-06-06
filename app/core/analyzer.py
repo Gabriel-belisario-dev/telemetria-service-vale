@@ -1,36 +1,45 @@
 import pandas as pd
+import os
 
-# Caminhos dos nossos dois arquivos vitais
 TELEMETRIA_LIMPA = "data/telemetria_limpa.parquet"
 REGRAS = "data/Alarmes - Regra de Negocio.xlsx"
 
-def analisar_frota():
-    print("Iniciando a ignição do Motor de Cruzamento de Dados...")
-
-    # 1. Carregamos o combustível limpo
+def obter_caminhoes_risco_temporal():
+    # Carrega dados
     df_dados = pd.read_parquet(TELEMETRIA_LIMPA)
-    
-    # 2. Carregamos as regras e aplicamos a correção de digitação humana (Tudo Maiúsculo)
     df_regras = pd.read_excel(REGRAS, engine='openpyxl')
-    df_regras['NIVEL'] = df_regras['NIVEL'].str.upper() 
     
-    print("Regras padronizadas com sucesso. Buscando ocorrências reais...")
+    # Prepara a data e o dicionário de resultados
+    df_dados['Data_Evento'] = pd.to_datetime(df_dados['Data_Evento'])
+    caminhoes_criticos = {}
+    total_infracoes = 0
 
-    # 3. Pegamos a lista de todos os nomes de alarmes que existem no Excel
-    eventos_perigosos = df_regras['EVENTO'].unique()
-    
-    # 4. Filtramos nossos milhões de registros para manter APENAS os alarmes que estão na regra
-    # Na base da Vale, o nome do evento fica na coluna 'Alarme'
-    ocorrencias_reais = df_dados[df_dados['Alarme'].isin(eventos_perigosos)]
-    
-    print("\n" + "="*50)
-    print(" 🚨 CRUZAMENTO DE DADOS CONCLUÍDO 🚨")
-    print("="*50)
-    print(f"Dos milhões de registros, encontramos {len(ocorrencias_reais):,} alertas que precisam ser monitorados pelas regras!")
-    
-    if not ocorrencias_reais.empty:
-        print("\n🏆 TOP 5 Caminhões (Tag_Frota) com mais alertas críticos disparados:")
-        print(ocorrencias_reais['Tag_Frota'].value_counts().head(5))
+    # Aplica a Janela Deslizante (Rolling Window)
+    for index, regra in df_regras.iterrows():
+        evento = regra['EVENTO']
+        qtd_maxima = int(regra['QTD'])
+        tempo_limite = int(regra['TEMPO'])
 
-if __name__ == "__main__":
-    analisar_frota()
+        df_evento = df_dados[df_dados['Alarme'] == evento].copy()
+        if df_evento.empty or qtd_maxima <= 1:
+            continue
+
+        df_evento = df_evento.sort_values(by=['Tag_Frota', 'Data_Evento'])
+        df_evento['Tempo_Passado'] = df_evento.groupby('Tag_Frota')['Data_Evento'].diff(periods=qtd_maxima - 1)
+        df_evento['Minutos'] = df_evento['Tempo_Passado'].dt.total_seconds() / 60.0
+        
+        infracoes = df_evento[df_evento['Minutos'] <= tempo_limite]
+
+        if not infracoes.empty:
+            total_infracoes += len(infracoes)
+            contagem = infracoes['Tag_Frota'].value_counts()
+            for caminhao, qtd in contagem.items():
+                caminhoes_criticos[caminhao] = caminhoes_criticos.get(caminhao, 0) + qtd
+
+    # Ordena os Top 5
+    top_5 = dict(sorted(caminhoes_criticos.items(), key=lambda item: item[1], reverse=True)[:5])
+    
+    return {
+        "total_infracoes_confirmadas": total_infracoes,
+        "top_5_criticos": top_5
+    }
